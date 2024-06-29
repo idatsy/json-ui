@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JSON Config Editor</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; padding: 20px; }
+        h1, h2, h3 { color: #333; }
+        #configEditor { margin-bottom: 20px; }
+        .config-item { margin-bottom: 10px; }
+        .config-item label { display: block; margin-bottom: 5px; }
+        .config-item input[type="text"], .config-item input[type="number"] { width: 100%; padding: 5px; }
+        .config-item textarea { width: 100%; height: 100px; }
+        button { background-color: #4CAF50; color: white; padding: 5px 10px; border: none; cursor: pointer; margin-top: 5px; }
+        button:hover { background-color: #45a049; }
+        .array-item { margin-left: 20px; }
+        .remove-item { background-color: #f44336; }
+        .remove-item:hover { background-color: #da190b; }
+        .checkbox-container { display: flex; align-items: center; }
+        .checkbox-container input[type="checkbox"] { margin-right: 5px; }
+        .nested-object { margin-left: 20px; border-left: 1px solid #ccc; padding-left: 10px; }
+        .array-controls { margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <h1>JSON Config Editor</h1>
+
+    <div id="configEditor"></div>
+
+    <button id="updateConfig">Update Configuration</button>
+
+    <script>
+        let config = {{ config | safe }};
+
+        function createConfigEditor(obj, parentKey = '') {
+            let html = '';
+            for (let key in obj) {
+                let fullKey = parentKey ? `${parentKey}.${key}` : key;
+                if (typeof obj[key] === 'object' && !Array.isArray(obj[key])) {
+                    html += `<div class="config-item">
+                                <h3>${key}</h3>
+                                <div class="nested-object">${createConfigEditor(obj[key], fullKey)}</div>
+                             </div>`;
+                } else if (Array.isArray(obj[key])) {
+                    html += `<div class="config-item"><h3>${key}</h3>`;
+                    if (obj[key].length > 0 && typeof obj[key][0] === 'object') {
+                        obj[key].forEach((item, index) => {
+                            html += `<div class="nested-object">
+                                        <h4>Item ${index + 1}</h4>
+                                        ${createConfigEditor(item, `${fullKey}.${index}`)}
+                                        <button class="remove-item" data-key="${fullKey}" data-index="${index}">Remove Item</button>
+                                     </div>`;
+                        });
+                    } else {
+                        html += `<textarea data-key="${fullKey}">${obj[key].join('\n')}</textarea>`;
+                    }
+                    html += `<div class="array-controls">
+                                <button class="add-item" data-key="${fullKey}">Add Item</button>
+                            </div></div>`;
+                } else if (typeof obj[key] === 'boolean') {
+                    html += `<div class="config-item checkbox-container">
+                                <input type="checkbox" id="${fullKey}" data-key="${fullKey}" ${obj[key] ? 'checked' : ''}>
+                                <label for="${fullKey}">${key}</label>
+                             </div>`;
+                } else {
+                    html += `<div class="config-item"><label>${key}</label><input type="${typeof obj[key] === 'number' ? 'number' : 'text'}" data-key="${fullKey}" value="${obj[key]}"></div>`;
+                }
+            }
+            return html;
+        }
+
+        function updateConfigFromDOM() {
+            $('input[data-key], textarea[data-key]').each(function() {
+                let key = $(this).data('key').split('.');
+                let value = $(this).val();
+                let currentObj = config;
+                for (let i = 0; i < key.length - 1; i++) {
+                    if (!isNaN(key[i])) {
+                        key[i] = parseInt(key[i]);
+                    }
+                    currentObj = currentObj[key[i]];
+                }
+                if (this.type === 'number') {
+                    currentObj[key[key.length - 1]] = parseFloat(value);
+                } else if (this.type === 'checkbox') {
+                    currentObj[key[key.length - 1]] = this.checked;
+                } else if (this.tagName === 'TEXTAREA') {
+                    if (Array.isArray(currentObj[key[key.length - 1]]) && typeof currentObj[key[key.length - 1]][0] === 'object') {
+                        // Don't split for arrays of objects
+                        currentObj[key[key.length - 1]] = JSON.parse(value);
+                    } else {
+                        currentObj[key[key.length - 1]] = value.split('\n').filter(item => item.trim() !== '');
+                    }
+                } else {
+                    currentObj[key[key.length - 1]] = value;
+                }
+            });
+        }
+
+        $(document).ready(function() {
+            $('#configEditor').html(createConfigEditor(config));
+
+            $('#configEditor').on('click', '.add-item', function() {
+                let key = $(this).data('key').split('.');
+                let currentObj = config;
+                for (let i = 0; i < key.length; i++) {
+                    currentObj = currentObj[key[i]];
+                }
+                if (typeof currentObj[0] === 'object') {
+                    let newItem = {};
+                    for (let prop in currentObj[0]) {
+                        newItem[prop] = typeof currentObj[0][prop] === 'number' ? 0 : '';
+                    }
+                    currentObj.push(newItem);
+                } else {
+                    currentObj.push('');
+                }
+                $('#configEditor').html(createConfigEditor(config));
+            });
+
+            $('#configEditor').on('click', '.remove-item', function() {
+                let key = $(this).data('key').split('.');
+                let index = $(this).data('index');
+                let currentObj = config;
+                for (let i = 0; i < key.length; i++) {
+                    currentObj = currentObj[key[i]];
+                }
+                currentObj.splice(index, 1);
+                $('#configEditor').html(createConfigEditor(config));
+            });
+
+            $('#updateConfig').click(function() {
+                updateConfigFromDOM();
+                $.ajax({
+                    url: '/update_config',
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({config: config}),
+                    success: function(response) {
+                        if (response.status === 'success') {
+                            alert('Configuration updated successfully.');
+                        } else {
+                            alert(response.message);
+                        }
+                    },
+                    error: function(error) {
+                        alert('Error updating configuration');
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>

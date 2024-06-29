@@ -1,0 +1,17 @@
+{
+  "name": "some name",
+  "age": 22,
+  "height": 5.8,
+  "isStudent": true,
+  "hobbies": ["coding"],
+  "allergies": [
+    {
+      "name": "peanut",
+      "severity": "high"
+    },
+    {
+      "name": "dust",
+      "severity": "low"
+    }
+  ]
+}
